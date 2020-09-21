@@ -1,0 +1,217 @@
+```{r}
+#After reading in data, Data Wrangling
+
+#Remove Implausible GPS values 
+taxi = taxi[taxi1$Pickup_longitude != "0", ]
+taxi = taxi[taxi2$Pickup_latitude != "0", ]
+
+#Remove fairs below 2.50 and above 200
+taxi = taxi[taxi$Fare_amount >= 2.50,]
+taxi = taxi[taxi$Fare_amount <= 200,]
+
+#Only Considering HaiL Trips
+taxi = taxi[taxi$Trip_type != "2", ]
+
+#Remove trips with tips above 30
+taxi = taxi[taxi$Tip_amount <= 30,]
+taxi = taxi[taxi$Trip_distance > 0,]
+
+#Remove Duplicate rows
+taxi = taxi[!duplicated(taxi),]
+
+#Remove Uneccsary variables
+taxi = taxi[ -c(1,2,3,4,8,9,10,13,14,15,16,17,19,20)]
+
+#Remove rows containing missing values
+taxi = na.omit(taxi)
+```
+
+```{r}
+#Linear Regression Model
+
+#Train/ Test Split
+training_idx = sample(1:nrow(taxi),nrow(taxi)*0.8,replace=FALSE)
+holdout_idx = setdiff(1:nrow(taxi),training_idx)
+training = taxi[training_idx,]
+holdout = taxi[holdout_idx,]
+
+#Model Training
+m = lm(Tip_amount ~ .,training)
+
+#Finding Residuals
+training_res = training$Tip_amount - predict(m,training)
+holdout_res = holdout$Tip_amount - predict(m,holdout)
+
+#Test to see if residuals mean = 0
+t.test(holdout_res,mu=0)
+
+#Testing for difference in mean training and test resids 
+t.test(training_res,holdout_res)
+
+#Testing for diff in variance in training and test resids
+var.test(training_res,holdout_res)
+
+#Downsampling to aid visualisation
+visual = holdout[sample(nrow(holdout), 500),]
+
+#Performance visualisation
+plot(visual$Tip_amount,predict(m,visual), ylim = c(0,6), ylab = "Predicted Tip", xlab = "Actual Tip")
+abline(0,1)
+```
+
+```{r}
+#Heat Maps
+library(ggplot2)
+library(ggmap)
+
+
+#Dowload google maps API
+register_google('AIzaSyBpPTMBATwDaBT******')
+map <- get_map(location= '40.681486, -73.970990', 
+                       maptype='roadmap', color='bw',source='google',zoom=13)
+
+#Plotting all pickups as points
+ggmap(map) + 
+  geom_point(data=taxi, aes(x=Pickup_longitude,y=Pickup_latitude, col=Trip_distance),size=0.02)+
+  scale_colour_gradient(limits=c(0, 10),low="blue", high="red")+
+  theme(axis.ticks = element_blank(), axis.text = element_blank())+
+  xlab('')+ylab('')
+
+#Heat Map
+ggmap(map,extent='device') +
+  geom_density2d(data=taxi,aes(x=Pickup_longitude,y=Pickup_latitude), bins=60) +
+  stat_density2d(data=taxi,aes(x=Pickup_longitude,y=Pickup_latitude,fill=..level.., alpha=..level..), geom='polygon')
+
+#Querying all trips with tips above $10
+Tips = taxi[taxi$Tip_amount >= 10,]
+
+#Heat Map no.2
+ggmap(map,extent='device') +
+  geom_density2d(data=Tips,aes(x=Pickup_longitude,y=Pickup_latitude), bins=30) +
+  stat_density2d(data=Tips,aes(x=Pickup_longitude,y=Pickup_latitude,fill=..level.., alpha=..level..), geom='polygon')
+```
+
+```{r}
+#Time conversion from long format to 24 hrs
+hours = as.character(taxi$pickup_datetime)
+hours = substring(hours, 12)
+hours = format(strptime(hours, "%I:%M:%S %p"), "%H:%M:%S")
+hours = substr(hours, start = 1, stop = 2)
+
+hours1 = as.numeric(hours)
+
+taxi = cbind(hours1, taxi)
+taxi = taxi[-c(2)]
+```
+
+```{r}
+#Importance of Tips
+library(ggplot2)
+library(dplyr)
+
+#Subsetting tip trips
+TipTrips = taxi[taxi$Tip_amount > 0,]
+
+#Obtaining means + medians
+faremed = median(TipTrips$Fare_amount)
+faremean = mean(TipTrips$Fare_amount)
+tipmed = median(TipTrips$Tip_amount)
+tipmean = mean(TipTrips$Tip_amount)
+
+
+#create dataframe of means+medians
+df = data.frame(Category = rep(c('Fare', 'Tip'),2), Metric = c('Mean', 'Median','Median', 'Mean'), Values = c(faremean,tipmed,faremed,tipmean))
+
+#Grouped bar plot
+ggplot(df, aes(fill=Category, y=Values, x=Metric)) + 
+    geom_bar(position="dodge", stat="identity") +
+    ggtitle("Tip Trips Average Payments") +
+    ylab("Amount ($)")
+
+
+#Pie Chart Data Wrangling and Formatting
+NoTip = taxi$Tip_amount[taxi$Tip_amount == 0]
+NoTip = cbind(rep('No Tip', length(NoTip)), NoTip)
+colnames(NoTip) <- c("col1","col2")
+NoTip = as.data.frame(NoTip)
+
+SmallTip = taxi$Tip_amount[taxi$Tip_amount > 0 & taxi$Tip_amount < 5]
+SmallTip = cbind(rep('Tip < 5$', length(SmallTip)), SmallTip)
+colnames(SmallTip) <- c("col1","col2")
+SmallTip = as.data.frame(SmallTip)
+
+BigTip = taxi$Tip_amount[taxi$Tip_amount >= 5]
+BigTip = cbind(rep('Tip >= 5$', length(BigTip)), BigTip)
+colnames(BigTip) <- c("col1","col2")
+BigTip = as.data.frame(BigTip)
+
+newdf1 <- data.frame(
+  group = c("No Tip", "Tip Below $5", "Tip $5 or Above"),
+  value = c(length(NoTip$col1), length(SmallTip$col1), length(BigTip$col1))
+  )
+#Finding Proportions
+prop = 100*(newdf1$value / length(taxi$Tip_amount))
+newdf1 = cbind(newdf1, prop)
+
+# Add label position to Pie chart
+newdf1 <- newdf1 %>%
+  arrange(desc(group)) %>%
+  mutate(lab.ypos = cumsum(prop) - 0.5*prop)
+
+#Rounding
+newdf1$prop = round(newdf1$prop, digits =1)
+
+#Plot
+ggplot(newdf1, aes(x = "", y = prop, fill = group)) +
+  geom_bar(width = 1, stat = "identity", color = "white") +
+  coord_polar("y", start = 0) +
+   geom_text(aes(y = lab.ypos, label = prop), color = "white")+
+  scale_fill_brewer(palette="Dark2") +
+  theme_void() +
+  ggtitle("Percentage of Trips Containing Tips")
+```
+
+```{r}
+#Plotting Tip Data over Location and time of interest
+library(tidyverse)
+#Subsetting Location of Interest
+LOItrips = taxi[taxi$Pickup_longitude > (-73.994699) & taxi$Pickup_longitude < (-73.982801),]
+LOItrips = LOItrips[LOItrips$Pickup_latitude > (40.688074) & LOItrips$Pickup_latitude < (40.704348),]
+ones = rep(1, length(LOItrips$hours1))
+LOItrips = cbind(LOItrips, ones)
+
+#Trips with tips
+tipsLOI = LOItrips[LOItrips$Tip_amount > 0,]
+ones = rep(1, length(tipsLOI$hours1))
+tipsLOI = cbind(tipsLOI, ones)
+
+#Trips w/out tips
+notipLOI =  LOItrips[LOItrips$Tip_amount == 0,]
+ones = rep(1, length(notipLOI$hours1))
+notipLOI = cbind(notipLOI, ones)
+
+#Finding total trips per hour
+A = aggregate(LOItrips$ones, list(LOItrips$hours1), sum)
+B = aggregate(tipsLOI$ones, list(tipsLOI$hours1),sum)
+C = aggregate(notipLOI$ones, list(notipLOI$hours1),sum)
+
+#Proportionately
+per = 100*(A$x / sum(A$x))
+A = cbind(A, per)
+per = 100*(B$x / sum(B$x))
+B =cbind(B, per)
+per = 100*(C$x / sum(C$x))
+C = cbind(C, per)
+
+#Formatting
+combine_df <- bind_rows(list(a = A, b = B, c = C), .id = 'ID')
+
+#MUlti Line graph
+ggplot(combine_df)+
+  geom_line(aes(x = Group.1, y = per, color = ID), size = 1)+
+  scale_color_manual(values = c("blue","green","red"),
+    labels = c(expression("All Trips"), expression("Tip Trips"), expression("No Tips"))) +
+  labs(y="% of Trips",
+       x = "Hour")
+```
+
