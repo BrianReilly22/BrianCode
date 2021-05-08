@@ -29,7 +29,6 @@ over.balanced = census.over[sample(nrow(census.over), dim(census.under)[1], repl
 adultcensus.oversampled = rbind.data.frame(census.under, over.balanced)
 adultcensus.oversampled = adultcensus.undersampled[order(adultcensus.undersampled$index),] # ordering by index so no order with underover
 
-
 ## Undersampled ##
 
 train.under = adultcensus.undersampled %>% sample_frac(0.8) # splitting into train and test sets
