@@ -1,0 +1,50 @@
+```{r}
+#Read in Data
+setwd("C:/Users/brian/Downloads")
+df= read.csv("nbaplayersdraft.csv")
+library(dplyr)
+
+
+```
+
+```{r}
+#Extracting cols of interst - Player, Career Minutes, Games & Years in NBA
+dfnew = df[c(2,5,8,9,10)]
+#Considering only picks before 2017
+dfnew = dfnew[dfnew$year < 2017,]
+#Removing any data containing NAs
+dfnew = dfnew[complete.cases(dfnew),]
+
+#Calculating Averages for each variable
+avrg.games = aggregate(dfnew$games, list(dfnew$team), FUN=mean) 
+avrg.minutes = aggregate(dfnew$minutes_played, list(dfnew$team), FUN=mean) 
+avrg.years = aggregate(dfnew$years_active, list(dfnew$team), FUN=mean) 
+
+#Finalising Dataframe
+avrg.df = cbind(avrg.games,avrg.minutes,avrg.years)
+avrg.df = avrg.df[-c(3,5)]
+names(avrg.df) = c("Team","Games", "Minutes", "Years")
+```
+
+
+
+
+```{r}
+#Removing non-active NBA teams & new franchises (founded post 2006)
+new.avrg.df = subset(avrg.df, Team != "WSB" & Team !="VAN" & Team !="SEA" & Team !="NJN" & Team !="NOH" & Team !="CHO" & Team !="CHA" & Team !="NOK" & Team !="BRK" & Team !="NOP" & Team !="OKC")
+
+#Rounding new Data Frame for export to Tableau for analysis
+new.avrg.df = new.avrg.df %>% 
+ mutate_at(vars(Games, Minutes, Years), list(~ round(., 2)))
+
+```
+
+
+
+```{r}
+#Export
+write.csv(new.avrg.df, "C:/Users/brian/Downloads\\BballFile.csv", row.names = FALSE)
+
+
+
+```

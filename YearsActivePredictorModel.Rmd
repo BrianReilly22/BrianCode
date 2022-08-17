@@ -1,0 +1,234 @@
+
+```{r}
+setwd("C:/Users/brian/Downloads/NBA Data")
+library(dplyr)
+library(data.table)
+library(dbplyr)
+
+#Reading in Key Data Files
+PlayerStats.DF = read.csv("all_seasons.csv")
+DraftStats.DF = read.csv("nbaplayersdraft.csv")
+Position.DF = read.csv("seasons_stats.csv")
+```
+
+```{r}
+#Clean Draft DF
+
+DraftStats.DF = DraftStats.DF[c(6,4,8)]
+colnames(DraftStats.DF)[1] = "player_name"
+
+#Remove duplicate players
+DraftStats.DF = DraftStats.DF[!duplicated(DraftStats.DF$player_name),]
+
+```
+
+```{r}
+
+#Combine DFs
+
+NewDF = merge(PlayerStats.DF, DraftStats.DF, by="player_name", all.x = FALSE)
+
+#Sort to remove duplicate later non-rookie seasons
+NewDF = NewDF[
+  order(NewDF[,1], NewDF[,4]),
+]
+
+#Remove Duplicates to Just maintain rookie year
+NewDF = NewDF[!duplicated(NewDF$player_name),]
+
+#Remove Undrafted Players - not to be considered in model
+NewDF = NewDF[NewDF$draft_number != "Undrafted",]
+
+
+#Remove unneccessary cols
+NewDF =  NewDF[-c(2,7,8,9,10,11,22)]
+
+```
+
+```{R}
+#Position Data
+Position.DF = Position.DF[Position.DF$Year > 1988,]
+
+#Sorting rows to remove non-rookie seasons
+Position.DF = Position.DF[
+  order(Position.DF[,3], Position.DF[,5]),
+]
+
+#Remove Duplicates
+Position.DF = Position.DF[!duplicated(Position.DF$Player),]
+
+#Selecting cols of interest
+Position.DF = Position.DF[c(3,4,7:51)]
+
+#Syncing column names for merge
+colnames(Position.DF)[1] = "player_name"
+
+#Adding 3rd DF
+NewDF = merge(NewDF, Position.DF, by="player_name", all.x = FALSE)
+
+#Putting Outcome Variable at the end of Data Frame for Convenience
+NewDF = NewDF[,c(colnames(NewDF)[colnames(NewDF)!='years_active'],'years_active')]
+
+#Removing Duplicate cols between data sources
+NewDF = NewDF[-c(6:12)]
+
+#Changing NAs to 0s (e.g when a player has no free throws the FT% was - to NA, needed to change to 0)
+NewDF[is.na(NewDF)] = 0
+
+#Removing cols that have covariance (e.g: No need to retain 3PA variable when we have 3P & 3P% vars- apologies for messiness (1 by 1 nature), obviously correct sequence important here
+NewDF = NewDF[-c(18,21,25)]
+NewDF = NewDF[-c(15)]
+NewDF = NewDF[-c(20)]
+NewDF = NewDF[-c(24)]
+NewDF = NewDF[-c(6,7)]
+NewDF = NewDF[-c(29,42)]
+NewDF = NewDF[-c(6)]
+```
+
+
+```{R}
+#Remove players Drafted since 2012, re-adding year drafted variable to data frame
+yeardrafted = PlayerStats.DF[c(2,9)]
+
+yeardrafted = yeardrafted[!duplicated(yeardrafted$player_name),]
+
+NewDF = merge(NewDF, yeardrafted, by = "player_name", all.x = TRUE )
+
+NewDF$draft_year = as.numeric(as.character(NewDF$draft_year))
+
+NewDF = NewDF[NewDF$draft_year <= 2012,]
+
+#Removing year drafted variable again
+NewDF = NewDF[c(1:45)]
+
+#Reduce no. of Positions to 5 for training purposes (change positions such as 'PF-C' to simply 'PF')
+Position5 = substr(NewDF$Pos, 1,2)
+NewDF$Pos = as.factor(Position5)
+NewDF$Pos = gsub("-","",NewDF$Pos)
+
+#Cleaning Column Names for training syntax
+colnames(NewDF)[12] = "FGpct"
+colnames(NewDF)[14] = "X3Ppct"
+colnames(NewDF)[16] = "X2Ppct"
+colnames(NewDF)[18] = "FTpct"
+colnames(NewDF)[30] = "ORBpct"
+colnames(NewDF)[31] = "DRBpct"
+colnames(NewDF)[32] = "TRBpct"
+colnames(NewDF)[33] = "ASTpct"
+colnames(NewDF)[34] = "STLpct"
+colnames(NewDF)[35] = "BLKpct"
+colnames(NewDF)[36] = "TOVpct"
+colnames(NewDF)[37] = "USGpct"
+colnames(NewDF)[40] = "WS48pct"
+
+
+
+```
+
+```{r}
+#Training Model
+#Remove Names from Training
+Training = NewDF[-c(1)]
+#Change Position from Character to Factor, Pick no to numeric
+Training$overall_pick = as.numeric(Training$overall_pick)
+Training$Pos = as.factor(Training$Pos)
+
+#Multiple Linear Regression Model
+#Simple Model, no interaction terms
+MLM.Model = lm(years_active ~ ., data = Training)
+summary(MLM.Model)
+
+#With Variable Selection to avoid Overfitting -  stepwise
+MLM.Model2 = step(MLM.Model)
+
+#Comparing MLR Models
+library(modelr)
+library(tidyverse)
+
+#Split DF in to 10 splits for training
+cv_k10 = crossv_kfold(Training, k = 10)
+
+#Walking over splits, creating 10 models
+MLM.Model = map(cv_k10$train, ~ lm(years_active ~ ., data = .)) 
+#Compute RMSEs of each of 10 models
+err_MLM.Model = map2_dbl(MLM.Model, cv_k10$test, rmse)
+err_MLM.Model  # Mean RMSE of 3.89
+
+#Do Same for Step Model (including only variables chosen by stepwise regression above)
+MLM.Model2 = map(cv_k10$train, ~ lm(years_active ~ player_height + overall_pick + Pos + G + FTpct + DRB + STL + BLK + FTr + TRBpct + USGpct + OWS + DWS + OBPM + DBPM,  data = .)) 
+err_MLM.Model2 = map2_dbl(MLM.Model2, cv_k10$test, rmse)
+err_MLM.Model2 # Mean RMSE of 3.79
+
+#Boxplots Comparison of modelling based on all variables and Step selected variables
+perf_df = data.frame(iter = 1:10, model1 = err_MLM.Model, model2 = err_MLM.Model2)
+perf_df = perf_df %>% pivot_longer(cols = model1:model2, names_to = "Model", values_to = "RMSE")
+
+perf_df %>% 
+  ggplot(aes(x = Model, y = RMSE)) + geom_boxplot() #Step Model appears to have slightly better performance
+
+#T-test to see if any significant difference between models (in this case no)
+t.test(err_MLM.Model, err_MLM.Model2)
+```
+
+```{r}
+# Building Neural Net
+library(neuralnet)
+
+#converting the qualitative variables (factors) to binary ("dummy") variables
+m = model.matrix(~ team_abbreviation + age + player_height + player_weight + 
+overall_pick + Pos + G + GS + MP + FG + FGpct + X3P + 
+X3Ppct + X2P + X2Ppct + FT + FTpct + ORB + DRB + AST + 
+STL + BLK + TOV + PF + PTS + PER + X3PAr + FTr + ORBpct + 
+DRBpct + TRBpct + ASTpct + STLpct + BLKpct + TOVpct + USGpct + 
+OWS + DWS + WS48pct + OBPM + DBPM + BPM + VORP + years_active, data = Training)
+
+# Normalize the data
+maxs = apply(m, 2, max) 
+mins = apply(m, 2, min)
+scaled = as.data.frame(scale(m, center = mins, 
+                              scale = maxs - mins))
+# Split the data into training and testing set
+index = sample(1:nrow(m), round(0.75 * nrow(m)))
+train_ = scaled[index,]
+test_ = scaled[-index,]
+
+```
+
+```{r}
+
+#Train the NN
+NN =neuralnet(years_active ~ team_abbreviationBKN + team_abbreviationBOS + 
+team_abbreviationCHA + team_abbreviationCHH + team_abbreviationCHI + team_abbreviationCLE + team_abbreviationDAL + team_abbreviationDEN + team_abbreviationDET + team_abbreviationGSW + team_abbreviationHOU + team_abbreviationIND + team_abbreviationLAC + team_abbreviationLAL + team_abbreviationMEM + team_abbreviationMIA + team_abbreviationMIL + team_abbreviationMIN + team_abbreviationNJN + team_abbreviationNOH + team_abbreviationNOK + team_abbreviationNYK + team_abbreviationOKC + team_abbreviationORL + team_abbreviationPHI + team_abbreviationPHX + team_abbreviationPOR + team_abbreviationSAC + team_abbreviationSAS + team_abbreviationSEA + team_abbreviationTOR + team_abbreviationUTA + team_abbreviationVAN + team_abbreviationWAS + age + player_height + player_weight + overall_pick + PosPF + PosPG + PosSF + PosSG + G + GS + MP + FG + FGpct + X3P + X3Ppct + X2P + X2Ppct + FT + FTpct + ORB + DRB + AST + STL + BLK + TOV + PF + PTS + PER + X3PAr + FTr + ORBpct + DRBpct + TRBpct + ASTpct + STLpct + BLKpct + TOVpct + USGpct + OWS + DWS + WS48pct + OBPM + DBPM + BPM + VORP, train_, hidden = c(5,3), linear.output = TRUE)
+
+# Predict on test data
+pr.nn = compute(NN, test_[,1:81])$net.result
+#Compute Test RMSE
+nn.test.sse = sqrt(sum((pr.nn - test_[,82])^2)/246)
+nn.test.sse
+#Test rmse = 0.25, far superior to that of MLM models!
+
+
+```
+
+
+```{r}
+#investigate Variable Importance
+#Create colour vector for the bar plot
+num.vars = 81
+cols<-colorRampPalette(c('lightgreen','lightblue'))(num.vars)
+#use the function on the model created above
+par(mar=c(3,4,1,1),family='serif')
+
+require(devtools)
+#import 'gar.fun' from Github
+source_gist('6206737')
+
+#Plot Variable Importance
+x = gar.fun(train_$years_active,NN)
+x
+
+#Minutes Played in Rookie Season (positively), teams Portland (negatively) & San Antonio (positvely), age (negatively) & player weight (negatively) are biggest predictors of years active
+
+```
+
+  
