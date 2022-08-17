@@ -1,3 +1,9 @@
+#NBA Draft Data Analysis (1989 - 2012)
+
+#NBA Years Active Model. Modelled using Draft Stats & Rookie Year Stats, using ML methods Multi Linear Regression (x2) & a Neural Net.
+#Results: NN produced strong predictor model (RMSE = 0.25 predicted on test data). Minutes Played in Rookie Season (positively), teams Portland (negatively) & San Antonio (positively), age (negatively) & player weight (negatively) are biggest predictors of years active
+#Implications: This model may be particularly useful for player agents when forecasting player longevity at the 1 year mark of their NBA careers (useful for contract negotiations)
+#Limitations: Injury History Data not available to be incorporated. However, Rookie Season MP & Draft Pick are obvious proxys 
 
 ```{r}
 setwd("C:/Users/brian/Downloads/NBA Data")
