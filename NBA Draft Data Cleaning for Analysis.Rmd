@@ -1,3 +1,7 @@
+#NBA Draft Data Analysis (1989 - 2016)
+
+#EDA of NBA Draft Data 1989-2016 (visualisation of Importance of Drafting Team available at https://public.tableau.com/app/profile/brian.reilly/viz/Avg_CareerGamesNBAPlayedbyTeamDrafted/Sheet22
+
 ```{r}
 #Read in Data
 setwd("C:/Users/brian/Downloads")
