@@ -1,0 +1,225 @@
+```{r}
+library(tidyverse)
+library(zoo)
+library(performance)
+library(caret)
+library(neuralnet)
+library(rpart)
+#Read in File
+#MasterDF = read.csv("DataDerby.csv")
+
+MasterDF = read.csv("DataDerbyNoGPS.csv")
+
+
+```
+
+```{r}
+#Correcting Variable Data Types
+MasterDF$race_date = as.Date(MasterDF$race_date)
+MasterDF$Race_Identifier = as.factor(MasterDF$Race_Identifier)
+MasterDF$race_number = as.factor(MasterDF$race_number)
+
+```
+
+```{r}
+#Track Condition & Time of Year
+plot(MasterDF$race_date, MasterDF$track_condition)
+
+#Conditions per Track
+Sar = MasterDF[MasterDF$track_id == "SAR",]
+Bel = MasterDF[MasterDF$track_id == "BEL",]
+Aqu = MasterDF[MasterDF$track_id == "AQU",]
+
+unique(Sar$track_condition)
+unique(Bel$track_condition)
+unique(Aqu$track_condition)
+
+unique(MasterDF$course_type)
+
+#Split DF by Turf & Dirt
+Dirt = MasterDF[MasterDF$course_type == "D",]
+Turf = MasterDF[MasterDF$course_type != "D" & MasterDF$course_type != "M",]
+
+
+```
+
+```{r}
+#Study Relationship between Odds & Track Condition
+
+#Sort DF by Race, then by Odds, extracting shortest price (favourite) horse for each race
+MasterDF = MasterDF[order(MasterDF[,3], MasterDF[,17]),]
+NewDF = MasterDF[!duplicated(MasterDF$Race_Identifier),]
+
+#Boxplots to explore relationship between Track Conditions & Favourite Odds
+ggplot(data=NewDF, mapping = aes(x = track_condition, y = odds)) + 
+  geom_boxplot() +
+  theme_bw()
+
+#Boxplots to explore relationship between Course Type & Favourite Odds.. Turf Tracks are associated with higher priced favs (more unpredictability)
+NewDF$course_type = gsub("D","Dirt",as.character(NewDF$course_type))
+NewDF$course_type = gsub("T","Turf",as.character(NewDF$course_type))
+NewDF$course_type = gsub("I","Turf-Inner",as.character(NewDF$course_type))
+NewDF$course_type = gsub("M","Hurdle",as.character(NewDF$course_type))
+NewDF$course_type = gsub("O","Turf-Outter",as.character(NewDF$course_type))
+
+NewDF$max_temp = as.numeric(NewDF$max_temp)
+NewDF$min_temp = as.numeric(NewDF$min_temp)
+NewDF$distance_id = as.numeric(NewDF$distance_id)
+NewDF$purse = as.numeric(NewDF$purse)
+NewDF$weight_carried = as.numeric(NewDF$weight_carried)
+NewDF$No_of_Horses_in_Race = as.numeric(NewDF$No_of_Horses_in_Race)
+
+#Adding Month Column
+Month = as.yearmon(NewDF$race_date)
+NewDF = cbind(NewDF, Month)
+NewDF$Month = gsub(" ","",as.character(NewDF$Month))
+NewDF$Month = as.factor(NewDF$Month)
+
+
+ggplot(data=NewDF, mapping = aes(x = course_type, y = odds, fill = course_type)) + 
+  geom_boxplot() +
+  theme_bw() +
+  ggtitle("Shortest Odds by Course Type") +
+  xlab("Course Type") + ylab("Favourite Odds")
+
+
+```
+```{r}
+#Create Model to Predict Track Condition, Firstly for Dirt Tracks
+#Adding Month Column
+Month = as.yearmon(Dirt$race_date)
+Dirt = cbind(Dirt, Month)
+Dirt$Month = as.factor(Dirt$Month)
+
+#Grouping Sloppy & Muddy together as 1 outcome, and Good  & Fast as another
+Dirt$track_condition = gsub("MY","Poor",as.character(Dirt$track_condition))
+Dirt$track_condition = gsub("SY","Poor",as.character(Dirt$track_condition))
+
+Dirt$track_condition = gsub("FT","Good",as.character(Dirt$track_condition))
+Dirt$track_condition = gsub("GD","Good",as.character(Dirt$track_condition))
+
+Dirt$track_condition = gsub(" ","",as.character(Dirt$track_condition))
+
+Dirt$track_condition = as.factor(Dirt$track_condition)
+
+#Removing Duplicate Races
+Dirt1 = Dirt[!duplicated(Dirt$Race_Identifier),]
+
+#Oversampling to Balance Classes
+x = as.data.frame(Dirt1 %>% select((-track_condition)))
+y = as.factor(Dirt1$track_condition)
+DirtBalanced = upSample(x,y,yname = "track_condition")
+
+#Create Training & Test Datasets
+ind = sample(2, nrow(DirtBalanced), replace = T, prob = c(0.8, 0.2))
+train = DirtBalanced[ind==1,]
+test = DirtBalanced[ind==2,]
+
+#Train Logistic Regression Model to Make Predictions about Track Condition
+Track_Condition_Predictor = glm(track_condition ~ track_id + Month, data = train, family = 'binomial')
+summary(Track_Condition_Predictor)
+
+#Make Predictions on Test Set
+Predictions = predict(Track_Condition_Predictor, test, type = 'response')
+pred2 = ifelse(Predictions>0.5, "Poor", "Good")
+
+# ordering the levels
+pred2 = ordered(pred2, levels = c("Good", "Poor"))
+test$track_condition = ordered(test$track_condition, levels = c("Good", "Poor"))
+
+tab2 = table(Predicted = pred2, Actual = test$track_condition)
+tab2
+
+confusionMatrix(tab2)
+
+# plot of probabilities
+plot(Predictions, 
+     main = "Scatterplot of Probabilities of Poor Conditions (test data)", 
+     xlab = "Prediction  #", ylab = "Predicted Probability of Poor Track")
+
+1 - sum(diag(tab2))/sum(tab2) #45.8% Misclassification Rate
+
+performance_hosmer(Track_Condition_Predictor, n_bins = 10)
+
+#Build Decision Tree Models
+TreeModel = rpart(track_condition ~ track_id + Month, data = train)
+
+TreePreds = predict(TreeModel, newdata = test)
+
+roc.curve(test$track_condition, TreePreds[,2]) #AUC 0.58
+
+```
+
+```{r}
+#Neural Network to Predict Favourite Starting Odds, without info on horse (weight or jockey)
+# Split the data into training and testing set
+#Create Training & Test Datasets
+ind = sample(2, nrow(NewDF), replace = T, prob = c(0.8, 0.2))
+train_ = NewDF[ind==1,]
+test_ = NewDF[ind==2,]
+
+train_$max_temp = as.numeric(train_$max_temp)
+train_$min_temp = as.numeric(train_$min_temp)
+train_$distance_id = as.numeric(train_$distance_id)
+train_$purse = as.numeric(train_$purse)
+train_$weight_carried = as.numeric(train_$weight_carried)
+train_$No_of_Horses_in_Race = as.numeric(train_$No_of_Horses_in_Race)
+
+test_$max_temp = as.numeric(test_$max_temp)
+test_$min_temp = as.numeric(test_$min_temp)
+test_$distance_id = as.numeric(test_$distance_id)
+test_$purse = as.numeric(test_$purse)
+test_$weight_carried = as.numeric(test_$weight_carried)
+test_$No_of_Horses_in_Race = as.numeric(test_$No_of_Horses_in_Race)
+
+```
+
+```{r}
+NewDF$max_temp = as.numeric(NewDF$max_temp)
+NewDF$min_temp = as.numeric(NewDF$min_temp)
+NewDF$distance_id = as.numeric(NewDF$distance_id)
+NewDF$purse = as.numeric(NewDF$purse)
+NewDF$weight_carried = as.numeric(NewDF$weight_carried)
+NewDF$No_of_Horses_in_Race = as.numeric(NewDF$No_of_Horses_in_Race)
+
+#Convert all the qualitative variables (factors) to binary ("dummy") variables
+m = model.matrix( 
+  ~ odds + track_id + distance_id + course_type + race_type + purse + No_of_Horses_in_Race + avg_temp + precipitation + Month + track_condition, data = NewDF
+)
+
+# Normalize the data
+maxs = apply(m, 2, max) 
+mins = apply(m, 2, min)
+scaled = as.data.frame(scale(m, center = mins, 
+                              scale = maxs - mins))
+# Split the data into training and testing set
+index = sample(1:nrow(m), round(0.75 * nrow(m)))
+train_ = scaled[index,]
+test_ = scaled[-index,]
+
+
+# Build Neural Network
+OddsPredictorNN = neuralnet(odds ~ track_idBEL + track_idSAR + distance_id + race_typeAOC + race_typeCLM + race_typeMCL + race_typeMSW + race_typeSHP + race_typeSOC + race_typeSST + race_typeSTK + race_typeSTR + race_typeWCL + purse + No_of_Horses_in_Race + avg_temp + precipitation + MonthFeb2019 + MonthMar2019 + MonthJan2019 + MonthMay2019 + MonthJun2019 + MonthJul2019 + MonthAug2019 + MonthSep2019 + MonthOct2019 + MonthNov2019 + MonthDec2019 + track_conditionGD + track_conditionMY + track_conditionSF + track_conditionSY + track_conditionFT + track_conditionYL, train_, hidden = 10, 
+                linear.output = TRUE)
+  
+# Predict on test data
+pr.nn = compute(OddsPredictorNN, test_[,1:13])
+  
+# Compute mean squared error
+pr.nn_ = pr.nn$net.result * (max(data$medv) - min(data$medv)) 
+                                              + min(data$medv)
+test.r = (test_$medv) * (max(data$medv) - min(data$medv)) + 
+                                              min(data$medv)
+MSE.nn = sum((test.r - pr.nn_)^2) / nrow(test_)
+  
+# Plot the neural network
+plot(nn)
+#Test rmse = 0.31
+
+```
+
+```{r}
+
+write.csv(NewDF, "C:/Users/brian/Downloads\\DataDerbyRaces.csv", row.names = FALSE)
+
+```
