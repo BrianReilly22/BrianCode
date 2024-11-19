@@ -1,0 +1,116 @@
+
+```{r}
+set.seed(42)  # Set seed for reproducibility
+
+# Parameters
+num_teams <- 12
+num_weeks <- 15
+num_simulations <- 1000000
+
+# Initialize results storage
+win_counts <- rep(0, num_weeks + 1)
+playoff_counts <- rep(0, num_weeks + 1)
+
+# Run simulations
+for (sim in 1:num_simulations) {
+  # Simulate a season
+  team_wins <- replicate(num_teams, sum(runif(num_weeks) > 0.5))
+  
+  # Determine playoff cutoff
+  sorted_wins <- sort(team_wins, decreasing = TRUE)
+  playoff_cutoff <- sorted_wins[4]  # Top 4 teams' win threshold
+  
+  # Count teams at and above the cutoff
+  num_teams_at_cutoff <- sum(team_wins == playoff_cutoff)
+  num_teams_above_cutoff <- sum(team_wins > playoff_cutoff)
+  
+  # Calculate available playoff spots
+  spots_remaining <- 4 - num_teams_above_cutoff
+  
+  # Assign playoff probabilities
+  playoff_probabilities <- ifelse(
+    team_wins > playoff_cutoff, 1,  # Teams above cutoff are guaranteed
+    ifelse(
+      team_wins == playoff_cutoff, spots_remaining / num_teams_at_cutoff, 0
+    )  # Split remaining spots among tied teams
+  )
+  
+  # Update counts
+  for (wins in 0:num_weeks) {
+    win_counts[wins + 1] <- win_counts[wins + 1] + sum(team_wins == wins)
+    playoff_counts[wins + 1] <- playoff_counts[wins + 1] + sum(playoff_probabilities[team_wins == wins])
+  }
+}
+
+# Calculate probabilities
+playoff_probs <- playoff_counts / win_counts
+
+# Output results
+output <- data.frame(
+  Record = sprintf("%d-%d", 0:num_weeks, num_weeks - 0:num_weeks),
+  Percentage = sprintf("%.5f%%", playoff_probs * 100)
+)
+print(output)
+
+
+
+```
+
+```{r}
+set.seed(42)  # Set seed for reproducibility
+
+# Parameters
+num_teams <- 12
+num_weeks <- 14
+num_simulations <- 1000000
+
+# Initialize results storage
+win_counts <- rep(0, num_weeks + 1)
+playoff_counts <- rep(0, num_weeks + 1)
+
+# Run simulations
+for (sim in 1:num_simulations) {
+  # Simulate a season
+  team_wins <- replicate(num_teams, sum(runif(num_weeks) > 0.5))
+  
+  # Determine playoff cutoff
+  sorted_wins <- sort(team_wins, decreasing = TRUE)
+  playoff_cutoff <- sorted_wins[4]  # Top 4 teams' win threshold
+  
+  # Count teams at and above the cutoff
+  num_teams_at_cutoff <- sum(team_wins == playoff_cutoff)
+  num_teams_above_cutoff <- sum(team_wins > playoff_cutoff)
+  
+  # Calculate available playoff spots
+  spots_remaining <- 4 - num_teams_above_cutoff
+  
+  # Assign playoff probabilities
+  playoff_probabilities <- ifelse(
+    team_wins > playoff_cutoff, 1,  # Teams above cutoff are guaranteed
+    ifelse(
+      team_wins == playoff_cutoff, spots_remaining / num_teams_at_cutoff, 0
+    )  # Split remaining spots among tied teams
+  )
+  
+  # Update counts
+  for (wins in 0:num_weeks) {
+    win_counts[wins + 1] <- win_counts[wins + 1] + sum(team_wins == wins)
+    playoff_counts[wins + 1] <- playoff_counts[wins + 1] + sum(playoff_probabilities[team_wins == wins])
+  }
+}
+
+# Calculate probabilities
+playoff_probs <- playoff_counts / win_counts
+
+# Output results
+output <- data.frame(
+  Record = sprintf("%d-%d", 0:num_weeks, num_weeks - 0:num_weeks),
+  Percentage = sprintf("%.5f%%", playoff_probs * 100)
+)
+print(output)
+
+
+
+
+
+```
